@@ -1,0 +1,38 @@
+#!/bin/bash
+
+# List all namespaces in the cluster
+NAMESPACES=$(kubectl get namespaces --output=json)
+
+# Loop through each namespace
+for ns_row in $(echo "$NAMESPACES" | jq -r '.items[] | @base64'); do
+  _ns_jq() {
+    echo ${ns_row} | base64 --decode | jq -r ${1}
+  }
+  NAMESPACE_NAME=$(_ns_jq '.metadata.name')
+
+  # List all pods in the current namespace
+  PODS=$(kubectl get pods -n "$NAMESPACE_NAME" --output=json)
+
+  # Loop through each pod and check mTLS status
+  for pod_row in $(echo "$PODS" | jq -r '.items[] | @base64'); do
+    _pod_jq() {
+      echo ${pod_row} | base64 --decode | jq -r ${1}
+    }
+    POD_NAME=$(_pod_jq '.metadata.name')
+
+    # List all services associated with the pod
+    SERVICES=$(kubectl get services -n "$NAMESPACE_NAME" --output=json)
+
+    for service_row in $(echo "$SERVICES" | jq -r '.items[] | @base64'); do
+      _service_jq() {
+        echo ${service_row} | base64 --decode | jq -r ${1}
+      }
+      SERVICE_NAME=$(_service_jq '.metadata.name')
+
+      # Check mTLS status for communication between pods and services
+      MTLS_STATUS=$(istioctl authn tls-check "$POD_NAME" ".$SERVICE_NAME" -n "$NAMESPACE_NAME" | tail -n 1)
+
+      echo "Namespace: $NAMESPACE_NAME, Source Pod: $POD_NAME, Destination Service: $SERVICE_NAME, mTLS Enabled: $MTLS_STATUS"
+    done
+  done
+done
